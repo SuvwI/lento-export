@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<title>片羽集 · 回忆录</title>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
+<!-- 字体数据（base64 编码，避免 .ttf 文件被某些托管平台 403） -->
+<script src="font_data.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2c2c2e;
+    background: #f5f5f7;
+    line-height: 1.75;
+    padding: 16px;
+  }
+  .container { max-width: 760px; margin: 0 auto; }
+
+  header { text-align: center; padding: 24px 0 16px; }
+  header h1 { font-size: 1.5rem; color: #1f2329; font-weight: 600; letter-spacing: 1px; }
+  header p { font-size: 0.85rem; color: #8a8a8e; margin-top: 6px; }
+
+  .card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .step-label {
+    display: inline-block;
+    font-size: 0.72rem;
+    color: #8e6b3c;
+    background: #f5ede0;
+    padding: 3px 10px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  label { display: block; font-size: 0.85rem; color: #636366; margin-bottom: 6px; font-weight: 500; }
+  input[type="text"], input[type="date"], select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid #d1d1d6;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    background: #fff;
+    color: #1f2329;
+    -webkit-appearance: none;
+  }
+  input:focus, select:focus { outline: none; border-color: #b8956a; }
+  .row { display: flex; gap: 12px; }
+  .row > * { flex: 1; }
+  .help { font-size: 0.72rem; color: #8a8a8e; margin-top: 6px; line-height: 1.5; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; }
+  .checkbox-row input { width: 18px; height: 18px; accent-color: #b8956a; }
+  .checkbox-row label { margin: 0; font-size: 0.9rem; color: #1f2329; }
+
+  button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #b8956a, #9c7a4f);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:active { opacity: 0.7; }
+  button:disabled { background: #c7c7cc; cursor: not-allowed; }
+  button.secondary { background: #fff; color: #6b4f2c; border: 1px solid #b8956a; }
+
+  #status { text-align: center; padding: 24px; color: #8a8a8e; font-size: 0.9rem; }
+  #status.error { color: #ff3b30; }
+  .spinner {
+    display: inline-block; width: 20px; height: 20px;
+    border: 2px solid #e0d5c0; border-top-color: #b8956a;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 8px; vertical-align: -4px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; padding: 0 4px; gap: 8px; flex-wrap: wrap;
+  }
+  .toolbar .count { font-size: 0.85rem; color: #636366; flex: 1; min-width: 120px; }
+  .toolbar button { width: auto; padding: 10px 20px; font-size: 0.9rem; }
+
+  .preview {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .preview-diary { border-bottom: 1px solid #f0ebe0; padding: 16px 0; }
+  .preview-diary:last-child { border-bottom: none; }
+  .preview-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding-bottom: 8px; margin-bottom: 10px;
+    border-bottom: 1px solid #f0ebe0;
+  }
+  .preview-date { font-size: 1rem; color: #6b4f2c; font-weight: 600; }
+  .preview-loc { font-size: 0.8rem; color: #a08c6e; }
+  .preview-img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 10px; }
+  .preview-desc { font-size: 0.95rem; color: #2c2c2e; line-height: 1.9; white-space: pre-wrap; }
+  .empty { text-align: center; padding: 40px 20px; color: #8a8a8e; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>片羽集 · 回忆录</h1>
+  <p>文字可复制 · 目录可跳转 · 每天新页 · 颜文字支持</p>
+</header>
+
+<section class="card" id="controls">
+  <div style="margin-bottom:16px;">
+    <span class="step-label">第 1 步</span>
+    <label>分享链接</label>
+    <input type="text" id="shareUrl" placeholder="粘贴片羽集分享链接...">
+    <div class="help">在片羽集 APP 里点「分享」→ 复制链接，粘贴到这里</div>
+  </div>
+
+  <div style="margin-bottom:16px;">
+    <span class="step-label">第 2 步</span>
+    <label>选择年份</label>
+    <select id="year"><option value="">请先粘贴链接</option></select>
+    <div class="help">年份从链接里自动识别</div>
+  </div>
+
+  <div class="row" style="margin-bottom:16px;">
+    <div>
+      <span class="step-label">第 3 步</span>
+      <label>开始日期（可选）</label>
+      <input type="date" id="dateFrom">
+    </div>
+    <div>
+      <span class="step-label"></span>
+      <label>结束日期（可选）</label>
+      <input type="date" id="dateTo">
+    </div>
+  </div>
+  <div class="help" style="margin-bottom:16px;">不选日期就是导出全年的日记</div>
+
+  <div class="checkbox-row" style="margin-bottom:16px;">
+    <input type="checkbox" id="includeImages" checked>
+    <label for="includeImages">包含图片（不勾选只导出文字，PDF 体积更小）</label>
+  </div>
+
+  <div class="checkbox-row" style="margin-bottom:16px;">
+    <input type="checkbox" id="calendarToc" checked>
+    <label for="calendarToc">日历样式目录（带缩略图，点击跳转）</label>
+  </div>
+
+  <button id="fetchBtn" disabled>获取日记</button>
+</section>
+
+<div id="status" hidden></div>
+
+<section id="diaries" hidden>
+  <div class="toolbar">
+    <span class="count" id="count"></span>
+    <button id="pdfBtn" class="secondary">下载 PDF</button>
+  </div>
+  <div id="list"></div>
+</section>
+
+</div>
+
+<script>
+const API = 'https://lentoapp.com:8091/getAlbumDatas';
+const OSS = 'https://pianyujiapp.oss-cn-hangzhou.aliyuncs.com/';
+const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'];
+const WEEKDAY_SHORT = ['日','一','二','三','四','五','六'];
+// 字体数据从 font_data.js 加载（base64 编码，避免 .ttf 被 403）
+
+const { PDFDocument, rgb } = PDFLib;
+
+const $ = id => document.getElementById(id);
+const shareUrl = $('shareUrl');
+const yearSel = $('year');
+const dateFrom = $('dateFrom');
+const dateTo = $('dateTo');
+const includeImages = $('includeImages');
+const calendarToc = $('calendarToc');
+const fetchBtn = $('fetchBtn');
+const pdfBtn = $('pdfBtn');
+const status = $('status');
+const diaries = $('diaries');
+const list = $('list');
+const count = $('count');
+
+let currentAlbumId = null;
+let currentEntries = [];
+let currentWithImages = true;
+let currentUseCalendarToc = true;
+let currentTitle = '片羽集 · 回忆录';
+let currentUser = '';
+let cachedFont = null;
+
+function parseShareUrl(url) {
+  const m = url.match(/album=([^&]+)/);
+  return m ? m[1] : null;
+}
+function parseYearFromUrl(url) {
+  const m = url.match(/year=(\d+)/);
+  return m ? parseInt(m[1]) : null;
+}
+
+shareUrl.addEventListener('input', () => {
+  const url = shareUrl.value.trim();
+  const id = parseShareUrl(url);
+  if (id) {
+    currentAlbumId = id;
+    fetchBtn.disabled = false;
+    const y = parseYearFromUrl(url);
+    if (y) {
+      yearSel.innerHTML = `<option value="${y}">${y} 年</option>`;
+      yearSel.value = String(y);
+    } else {
+      yearSel.innerHTML = '<option value="">链接里没识别到年份</option>';
+    }
+  } else {
+    currentAlbumId = null;
+    fetchBtn.disabled = true;
+    yearSel.innerHTML = '<option value="">请先粘贴链接</option>';
+  }
+});
+
+async function fetchYear(albumId, year, onProgress) {
+  let entries = [];
+  let index = 1;
+  while (true) {
+    const body = {albumid: albumId, order: 0, year: year, index: index};
+    const r = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if (String(d.meta?.code) !== '200') throw new Error(`API 返回 ${d.meta?.code}`);
+    const page = d.data || [];
+    entries = entries.concat(page);
+    if (d.title) currentTitle = d.title;
+    if (d.username) currentUser = d.username;
+    if (onProgress) onProgress(entries.length, d.count || entries.length);
+    const nxt = d.next;
+    if (!nxt || nxt <= index) break;
+    index = nxt;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return entries;
+}
+
+function filterByDate(entries, from, to) {
+  if (!from && !to) return entries;
+  return entries.filter(e => {
+    const d = e.recorddate.replace(/\//g,'-');
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderPreview(entries, withImages) {
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.innerHTML = '<div class="empty">这段时间没有日记</div>';
+    return;
+  }
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+  entries.slice(0, 5).forEach(e => {
+    const iso = e.recorddate.replace(/\//g,'-');
+    const d = new Date(iso);
+    const weekday = WEEKDAYS[d.getDay()];
+    const loc = e.location || '';
+    const div = document.createElement('div');
+    div.className = 'preview-diary';
+    let html = `<div class="preview-header">
+      <div class="preview-date">${escapeHtml(iso)} ${escapeHtml(weekday)}</div>
+      <div class="preview-loc">${escapeHtml(loc)}</div>
+    </div>`;
+    if (withImages && e.url) {
+      html += `<img class="preview-img" src="${OSS + e.url}" referrerpolicy="no-referrer" loading="lazy">`;
+    }
+    if (e.desc) {
+      html += `<div class="preview-desc">${escapeHtml(e.desc)}</div>`;
+    }
+    div.innerHTML = html;
+    preview.appendChild(div);
+  });
+  if (entries.length > 5) {
+    const more = document.createElement('div');
+    more.style.cssText = 'text-align:center;padding:12px;color:#8a8a8e;font-size:0.85rem;';
+    more.textContent = `还有 ${entries.length - 5} 篇，下载 PDF 查看全部`;
+    preview.appendChild(more);
+  }
+  list.appendChild(preview);
+}
+
+function showStatus(msg, isError) {
+  status.hidden = false;
+  status.className = isError ? 'error' : '';
+  status.innerHTML = msg;
+}
+function hideStatus() { status.hidden = true; }
+
+fetchBtn.addEventListener('click', async () => {
+  if (!currentAlbumId) return;
+  const year = parseInt(yearSel.value);
+  if (!year) return;
+  diaries.hidden = true;
+  showStatus(`<span class="spinner"></span>正在拉取 ${year} 年数据...`);
+  try {
+    const entries = await fetchYear(currentAlbumId, year, (got, total) => {
+      showStatus(`<span class="spinner"></span>拉取中... ${got} / ${total} 条`);
+    });
+    const filtered = filterByDate(entries, dateFrom.value, dateTo.value);
+    currentEntries = filtered;
+    currentWithImages = includeImages.checked;
+    currentUseCalendarToc = calendarToc.checked;
+    renderPreview(filtered, includeImages.checked);
+    const imgCount = filtered.filter(e => e.url).length;
+    count.textContent = `共 ${filtered.length} 篇${includeImages.checked && imgCount ? `（含 ${imgCount} 张图）` : ''}`;
+    hideStatus();
+    diaries.hidden = false;
+    if (!filtered.length) showStatus('这段时间没有日记', false);
+  } catch (e) {
+    showStatus(`获取失败：${e.message}<br>请检查链接是否正确，或稍后重试`, true);
+  }
+});
+
+// ====== 加载字体（从 base64 数据，不依赖 .ttf 文件）======
+function loadFont() {
+  if (cachedFont) return cachedFont;
+  if (typeof FONT_BASE64 === 'undefined') {
+    throw new Error('字体数据未加载（font_data.js 缺失或加载失败）');
+  }
+  // base64 → ArrayBuffer
+  const binaryStr = atob(FONT_BASE64);
+  const len = binaryStr.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  cachedFont = bytes.buffer;
+  return cachedFont;
+}
+
+// ====== 中文文本换行（按字符宽度）======
+function wrapText(text, maxWidth, font, fontSize) {
+  const lines = [];
+  const paragraphs = text.split('\n');
+  for (const para of paragraphs) {
+    if (!para) { lines.push(''); continue; }
+    let current = '';
+    for (const char of para) {
+      const test = current + char;
+      const width = font.widthOfTextAtSize(test, fontSize);
+      if (width > maxWidth && current) {
+        lines.push(current);
+        current = char;
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+  }
+  return lines;
+}
+
+// ====== 图片加载（canvas 方式，绕过 CORS）======
+async function fetchImageAsArrayBuffer(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.referrerPolicy = 'no-referrer';
+    img.onload = async () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(async (blob) => {
+          if (!blob) { resolve(null); return; }
+          const buf = await blob.arrayBuffer();
+          resolve(buf);
+        }, 'image/jpeg', 0.92);
+      } catch (e) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+// ====== 用 pdf-lib 生成 PDF ======
+pdfBtn.addEventListener('click', async () => {
+  if (!currentEntries.length) {
+    showStatus('没有日记可导出', true);
+    return;
+  }
+
+  showStatus(`<span class="spinner"></span>正在加载字体...`);
+  let fontBytes;
+  try {
+    fontBytes = loadFont();
+  } catch (e) {
+    showStatus(`字体加载失败：${e.message}`, true);
+    return;
+  }
+
+  showStatus(`<span class="spinner"></span>正在生成 PDF...`);
+
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(fontBytes, { subset: true });
+
+  // A4 尺寸
+  const pageW = 595;
+  const pageH = 842;
+  const margin = 48;
+  const contentW = pageW - margin * 2;
+
+  // 颜色
+  const brown = rgb(0.42, 0.31, 0.17);
+  const lightBrown = rgb(0.63, 0.55, 0.43);
+  const gold = rgb(0.72, 0.58, 0.42);
+  const darkText = rgb(0.17, 0.17, 0.18);
+  const dividerColor = rgb(0.94, 0.92, 0.88);
+  const grayText = rgb(0.6, 0.6, 0.6);
+
+  // 计算日期范围
+  const dates = currentEntries.map(e => e.recorddate.replace(/\//g,'-')).sort();
+  const minDate = dates[0];
+  const maxDate = dates[dates.length - 1];
+
+  // ====== 预加载所有图片到缓存 ======
+  const imageCache = {}; // url -> embedded image
+  if (currentWithImages) {
+    for (let i = 0; i < currentEntries.length; i++) {
+      const e = currentEntries[i];
+      if (e.url && !imageCache[e.url]) {
+        showStatus(`<span class="spinner"></span>加载图片 ${i+1}/${currentEntries.length}...`);
+        try {
+          const imgData = await fetchImageAsArrayBuffer(OSS + e.url);
+          if (imgData) {
+            let embedded;
+            try { embedded = await doc.embedJpg(imgData); }
+            catch { try { embedded = await doc.embedPng(imgData); } catch {} }
+            if (embedded) imageCache[e.url] = embedded;
+          }
+        } catch {}
+      }
+    }
+  }
+
+  // ====== 封面页 ======
+  showStatus(`<span class="spinner"></span>生成封面...`);
+  const coverPage = doc.addPage([pageW, pageH]);
+  const titleSize = 24;
+  const titleWidth = font.widthOfTextAtSize(currentTitle, titleSize);
+  coverPage.drawText(currentTitle, {
+    x: (pageW - titleWidth) / 2, y: pageH * 0.55,
+    size: titleSize, font: font, color: darkText,
+  });
+  const subtitle = '回 忆 录';
+  const subSize = 12;
+  const subWidth = font.widthOfTextAtSize(subtitle, subSize);
+  coverPage.drawText(subtitle, {
+    x: (pageW - subWidth) / 2, y: pageH * 0.55 - 30,
+    size: subSize, font: font, color: lightBrown,
+  });
+  coverPage.drawLine({
+    start: { x: pageW/2 - 24, y: pageH * 0.55 - 52 },
+    end: { x: pageW/2 + 24, y: pageH * 0.55 - 52 },
+    thickness: 0.5, color: gold,
+  });
+  let metaLine = '';
+  if (currentUser) metaLine += currentUser;
+  if (minDate === maxDate) {
+    metaLine += (metaLine ? ' · ' : '') + minDate;
+  } else {
+    metaLine += (metaLine ? ' · ' : '') + `${minDate} ~ ${maxDate}`;
+  }
+  const metaSize = 10;
+  const metaWidth = font.widthOfTextAtSize(metaLine, metaSize);
+  coverPage.drawText(metaLine, {
+    x: (pageW - metaWidth) / 2, y: pageH * 0.55 - 72,
+    size: metaSize, font: font, color: gold,
+  });
+
+  // ====== 创建所有日记页，记录每页的 ref ======
+  const diaryPages = []; // [{pageRef, page}]
+
+  for (let i = 0; i < currentEntries.length; i++) {
+    const e = currentEntries[i];
+    const iso = e.recorddate.replace(/\//g,'-');
+    const d = new Date(iso);
+    const weekday = WEEKDAYS[d.getDay()];
+    const loc = e.location || '';
+    const dateText = `${iso}  ${weekday}`;
+
+    showStatus(`<span class="spinner"></span>生成日记 ${i+1}/${currentEntries.length}...`);
+
+    // 每篇日记新起一页
+    const page = doc.addPage([pageW, pageH]);
+    let y = pageH - margin;
+
+    // 行首：日期（左上）
+    page.drawText(dateText, {
+      x: margin, y: y, size: 13, font: font, color: brown,
+    });
+
+    // 右上：地点
+    if (loc) {
+      const locSize = 9;
+      const locWidth = font.widthOfTextAtSize(loc, locSize);
+      page.drawText(loc, {
+        x: pageW - margin - locWidth, y: y + 2,
+        size: locSize, font: font, color: lightBrown,
+      });
+    }
+
+    y -= 10;
+    page.drawLine({
+      start: { x: margin, y: y }, end: { x: pageW - margin, y: y },
+      thickness: 0.5, color: dividerColor,
+    });
+    y -= 22;
+
+    // 图片（复用缓存）
+    if (currentWithImages && e.url && imageCache[e.url]) {
+      const embedded = imageCache[e.url];
+      const maxImgH = 500;
+      const maxImgW = contentW;
+      let imgW = embedded.width;
+      let imgH = embedded.height;
+      const scale = Math.min(maxImgW / imgW, maxImgH / imgH, 1);
+      imgW = imgW * scale;
+      imgH = imgH * scale;
+      if (y - imgH < margin) {
+        // 放不下就换页
+        const newPage = doc.addPage([pageW, pageH]);
+        y = pageH - margin;
+        const imgX = margin + (contentW - imgW) / 2;
+        newPage.drawImage(embedded, { x: imgX, y: y - imgH, width: imgW, height: imgH });
+        y -= imgH + 18;
+        // 正文在新页
+        if (e.desc) {
+          const fontSize = 11;
+          const lineHeight = 17;
+          const lines = wrapText(e.desc, contentW, font, fontSize);
+          for (const line of lines) {
+            if (y - lineHeight < margin) {
+              const p2 = doc.addPage([pageW, pageH]);
+              y = pageH - margin;
+              p2.drawText(line, { x: margin, y: y - fontSize, size: fontSize, font: font, color: darkText });
+              y -= lineHeight;
+            } else {
+              newPage.drawText(line, { x: margin, y: y - fontSize, size: fontSize, font: font, color: darkText });
+              y -= lineHeight;
+            }
+          }
+        }
+        diaryPages.push({ pageRef: page.ref, page: page });
+        continue;
+      }
+      const imgX = margin + (contentW - imgW) / 2;
+      page.drawImage(embedded, { x: imgX, y: y - imgH, width: imgW, height: imgH });
+      y -= imgH + 18;
+    }
+
+    // 正文（内容多就自动翻页延续）
+    if (e.desc) {
+      const fontSize = 11;
+      const lineHeight = 17;
+      const lines = wrapText(e.desc, contentW, font, fontSize);
+      let currentPage = page;
+      for (const line of lines) {
+        if (y - lineHeight < margin) {
+          currentPage = doc.addPage([pageW, pageH]);
+          y = pageH - margin;
+        }
+        currentPage.drawText(line, {
+          x: margin, y: y - fontSize, size: fontSize, font: font, color: darkText,
+        });
+        y -= lineHeight;
+      }
+    }
+
+    diaryPages.push({ pageRef: page.ref, page: page });
+  }
+
+  // ====== 目录页 ======
+  // 关键：用 insertPage 在封面后连续插入目录页，而不是 addPage（会追加到文档末尾导致目录被日记页打断）
+  showStatus(`<span class="spinner"></span>生成目录...`);
+  let tocInsertIndex = 1; // 封面在 index 0，目录从 index 1 开始，日记页会被往后推
+
+  if (currentUseCalendarToc) {
+    await drawCalendarToc(doc, font, currentEntries, diaryPages, imageCache, {
+      pageW, pageH, margin, contentW, brown, lightBrown, gold, darkText, dividerColor, grayText,
+      currentWithImages, WEEKDAY_SHORT, getTocIndex: () => tocInsertIndex, incTocIndex: () => tocInsertIndex++,
+    });
+  } else {
+    drawListToc(doc, font, currentEntries, diaryPages, {
+      pageW, pageH, margin, contentW, brown, lightBrown, gold, darkText, dividerColor,
+      getTocIndex: () => tocInsertIndex, incTocIndex: () => tocInsertIndex++,
+    });
+  }
+
+  // ====== 保存并下载 ======
+  showStatus(`<span class="spinner"></span>保存 PDF...`);
+  const pdfBytes = await doc.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${currentTitle} - 回忆录.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  hideStatus();
+  showStatus(`✅ PDF 已生成并下载，共 ${doc.getPageCount()} 页`);
+});
+
+// ====== 日历样式目录 ======
+async function drawCalendarToc(doc, font, entries, diaryPages, imageCache, cfg) {
+  const { pageW, pageH, margin, contentW, brown, lightBrown, gold, darkText, dividerColor, grayText, currentWithImages, WEEKDAY_SHORT, getTocIndex, incTocIndex } = cfg;
+
+  // 按年月分组
+  const byMonth = {};
+  const entryIndexMap = {};
+  entries.forEach((e, idx) => {
+    const iso = e.recorddate.replace(/\//g,'-');
+    const ym = iso.substring(0, 7);
+    if (!byMonth[ym]) byMonth[ym] = {};
+    byMonth[ym][parseInt(iso.substring(8, 10))] = e;
+    entryIndexMap[iso] = idx;
+  });
+
+  const months = Object.keys(byMonth).sort().reverse();
+
+  // 放大格子：缩略图更清晰
+  const cellW = contentW / 7;
+  const cellH = 68;
+  const monthTitleH = 26;   // 月份标题
+  const weekdayH = 16;       // 星期标题行
+  const gridRows = 6;
+  const monthBlockHeight = monthTitleH + weekdayH + gridRows * cellH + 24;
+
+  // 插入第一个目录页（紧跟封面）
+  let tocPage = doc.insertPage(getTocIndex(), [pageW, pageH]);
+  incTocIndex();
+  let tocY = pageH - margin;
+
+  // 目录总标题
+  const tocTitle = '目 录';
+  const tocTitleSize = 20;
+  const tocTitleWidth = font.widthOfTextAtSize(tocTitle, tocTitleSize);
+  tocPage.drawText(tocTitle, {
+    x: (pageW - tocTitleWidth) / 2, y: tocY,
+    size: tocTitleSize, font: font, color: darkText,
+  });
+  tocY -= 28;
+  tocPage.drawLine({
+    start: { x: margin, y: tocY }, end: { x: pageW - margin, y: tocY },
+    thickness: 0.5, color: dividerColor,
+  });
+  tocY -= 28;
+
+  for (const ym of months) {
+    const [year, month] = ym.split('-').map(Number);
+    const monthEntries = byMonth[ym];
+
+    // 检查是否需要换页（一页放不下整个月就换新页）
+    if (tocY - monthBlockHeight < margin) {
+      tocPage = doc.insertPage(getTocIndex(), [pageW, pageH]);
+      incTocIndex();
+      tocY = pageH - margin;
+    }
+
+    // 月份标题
+    const monthTitle = `${year}年 ${month}月`;
+    tocPage.drawText(monthTitle, {
+      x: margin, y: tocY, size: 15, font: font, color: brown,
+    });
+    tocY -= monthTitleH;
+
+    // 星期标题
+    for (let i = 0; i < 7; i++) {
+      const w = font.widthOfTextAtSize(WEEKDAY_SHORT[i], 10);
+      tocPage.drawText(WEEKDAY_SHORT[i], {
+        x: margin + i * cellW + (cellW - w) / 2, y: tocY,
+        size: 10, font: font, color: lightBrown,
+      });
+    }
+    tocY -= weekdayH;
+
+    // 日期格子
+    const firstDay = new Date(year, month - 1, 1).getDay();
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const gridTop = tocY;
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayOfWeek = (day - 1 + firstDay) % 7;
+      const row = Math.floor((day - 1 + firstDay) / 7);
+      const x = margin + dayOfWeek * cellW;
+      const y = gridTop - row * cellH;
+
+      const entry = monthEntries[day];
+      const hasEntry = !!entry;
+
+      // 格子边框 + 背景
+      tocPage.drawRectangle({
+        x: x + 1, y: y - cellH + 3, width: cellW - 2, height: cellH - 3,
+        borderColor: dividerColor, borderWidth: 0.3,
+        color: hasEntry ? rgb(0.98, 0.96, 0.92) : undefined,
+      });
+
+      // 日期数字（左上角）
+      const dayStr = String(day);
+      const dayColor = hasEntry ? brown : grayText;
+      tocPage.drawText(dayStr, {
+        x: x + 4, y: y - 14, size: 10, font: font, color: dayColor,
+      });
+
+      // 缩略图 + 链接
+      if (hasEntry) {
+        const iso = `${ym}-${String(day).padStart(2, '0')}`;
+        const entryIdx = entryIndexMap[iso];
+        if (entryIdx >= 0 && diaryPages[entryIdx]) {
+          // 缩略图：尽量填满格子（留出日期数字空间）
+          if (currentWithImages && entry.url && imageCache[entry.url]) {
+            const embedded = imageCache[entry.url];
+            const thumbMaxW = cellW - 6;
+            const thumbMaxH = cellH - 20; // 留出顶部日期空间
+            let tw = embedded.width;
+            let th = embedded.height;
+            const scale = Math.min(thumbMaxW / tw, thumbMaxH / th);
+            tw = tw * scale;
+            th = th * scale;
+            const thumbX = x + (cellW - tw) / 2;
+            const thumbY = y - cellH + 3 + (thumbMaxH - th) / 2;
+            tocPage.drawImage(embedded, {
+              x: thumbX, y: thumbY, width: tw, height: th,
+              opacity: 0.9,
+            });
+          } else {
+            // 没图片但有日记：画一个小圆点提示
+            tocPage.drawCircle({
+              x: x + cellW / 2, y: y - cellH / 2 - 4, size: 2,
+              color: gold,
+            });
+          }
+
+          // 链接注释（整个格子可点击）
+          const goAction = doc.context.obj({
+            S: 'GoTo',
+            D: [diaryPages[entryIdx].pageRef, 'XYZ', 0, pageH - margin, 0],
+          });
+          const linkAnnot = doc.context.obj({
+            Type: 'Annot',
+            Subtype: 'Link',
+            Rect: [x + 1, y - cellH + 3, x + cellW - 1, y + 2],
+            A: goAction,
+            Border: [0, 0, 0],
+          });
+          tocPage.node.addAnnot(linkAnnot);
+        }
+      }
+    }
+
+    tocY = gridTop - gridRows * cellH - 24;
+  }
+}
+
+// ====== 列表样式目录 ======
+function drawListToc(doc, font, entries, diaryPages, cfg) {
+  const { pageW, pageH, margin, contentW, brown, lightBrown, gold, darkText, dividerColor, getTocIndex, incTocIndex } = cfg;
+
+  let tocPage = doc.insertPage(getTocIndex(), [pageW, pageH]);
+  incTocIndex();
+  let tocY = pageH - margin - 20;
+
+  const tocTitle = '目 录';
+  const tocTitleSize = 18;
+  const tocTitleWidth = font.widthOfTextAtSize(tocTitle, tocTitleSize);
+  tocPage.drawText(tocTitle, {
+    x: (pageW - tocTitleWidth) / 2, y: tocY,
+    size: tocTitleSize, font: font, color: darkText,
+  });
+  tocY -= 22;
+  tocPage.drawLine({
+    start: { x: margin, y: tocY }, end: { x: pageW - margin, y: tocY },
+    thickness: 0.5, color: dividerColor,
+  });
+  tocY -= 24;
+
+  // 按日期倒序排序索引（不影响 diaryPages 的对应关系）
+  const sortedIdx = entries.map((_, i) => i).sort((a, b) => {
+    const da = entries[a].recorddate.replace(/\//g, '-');
+    const db = entries[b].recorddate.replace(/\//g, '-');
+    return db.localeCompare(da);
+  });
+
+  for (const i of sortedIdx) {
+    const e = entries[i];
+    const iso = e.recorddate.replace(/\//g,'-');
+    const d = new Date(iso);
+    const weekday = WEEKDAYS[d.getDay()];
+    const loc = e.location || '';
+    const dateText = `${iso}  ${weekday}`;
+
+    // 检查换页：用 insertPage 插入新目录页（紧跟上一页），不是 addPage
+    if (tocY < margin + 30) {
+      tocPage = doc.insertPage(getTocIndex(), [pageW, pageH]);
+      incTocIndex();
+      tocY = pageH - margin;
+    }
+
+    const itemSize = 10;
+    tocPage.drawText(dateText, {
+      x: margin, y: tocY, size: itemSize, font: font, color: brown,
+    });
+
+    if (loc) {
+      const locSize = 8;
+      const locWidth = font.widthOfTextAtSize(loc, locSize);
+      tocPage.drawText(loc, {
+        x: pageW - margin - locWidth, y: tocY + 1,
+        size: locSize, font: font, color: lightBrown,
+      });
+    }
+
+    // 链接
+    const goAction = doc.context.obj({
+      S: 'GoTo',
+      D: [diaryPages[i].pageRef, 'XYZ', 0, pageH - margin, 0],
+    });
+    const linkAnnot = doc.context.obj({
+      Type: 'Annot', Subtype: 'Link',
+      Rect: [margin, tocY - 2, pageW - margin, tocY + 12],
+      A: goAction, Border: [0, 0, 0],
+    });
+    tocPage.node.addAnnot(linkAnnot);
+
+    tocY -= 20;
+  }
+}
+</script>
+</body>
+</html>
