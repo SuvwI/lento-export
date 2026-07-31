@@ -6,8 +6,7 @@
 <title>片羽集 · 回忆录</title>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
-<!-- 字体数据（base64 编码，避免 .ttf 文件被某些托管平台 403） -->
-<script src="font_data.js"></script>
+<!-- 字体数据延迟加载（点"下载 PDF"时才动态加载，不阻塞页面打开） -->
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body {
@@ -18,22 +17,6 @@
     padding: 16px;
   }
   .container { max-width: 760px; margin: 0 auto; }
-
-  /* 加载遮罩 */
-  #loader {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: #f5f5f7; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; z-index: 9999;
-    transition: opacity 0.4s;
-  }
-  #loader .spinner {
-    width: 36px; height: 36px;
-    border: 3px solid #e0e0e0; border-top-color: #8e6b3c;
-    border-radius: 50%; animation: spin 0.8s linear infinite;
-    margin-bottom: 16px;
-  }
-  #loader .text { font-size: 0.9rem; color: #8a8a8e; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   header { text-align: center; padding: 24px 0 16px; }
   header h1 { font-size: 1.5rem; color: #1f2329; font-weight: 600; letter-spacing: 1px; }
@@ -133,8 +116,6 @@
 </style>
 </head>
 <body>
-<!-- 加载遮罩（font_data.js 加载完成后自动隐藏）-->
-<div id="loader"><div class="spinner"></div><div class="text">正在加载字体数据（约 12MB），请稍候...</div></div>
 
 <div class="container">
 
@@ -382,13 +363,28 @@ fetchBtn.addEventListener('click', async () => {
   }
 });
 
-// ====== 加载字体（从 base64 数据，不依赖 .ttf 文件）======
-function loadFont() {
+// ====== 加载字体（延迟加载：点下载 PDF 时才动态加载 font_data.js）======
+async function loadFont() {
   if (cachedFont) return cachedFont;
+
+  // 如果 font_data.js 尚未加载，动态加载
   if (typeof FONT_BASE64 === 'undefined') {
-    throw new Error('字体数据未加载（font_data.js 缺失或加载失败）');
+    showStatus(`<span class="spinner"></span>正在加载字体数据（约 12MB，首次需几秒）...`);
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'font_data.js';
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('font_data.js 加载失败，请检查网络'));
+      document.head.appendChild(script);
+    });
   }
-  // base64 → ArrayBuffer
+
+  if (typeof FONT_BASE64 === 'undefined') {
+    throw new Error('字体数据加载异常');
+  }
+
+  showStatus(`<span class="spinner"></span>正在解析字体数据...`);
+  // base64 → ArrayBuffer（分块处理避免阻塞）
   const binaryStr = atob(FONT_BASE64);
   const len = binaryStr.length;
   const bytes = new Uint8Array(len);
@@ -469,7 +465,7 @@ pdfBtn.addEventListener('click', async () => {
   showStatus(`<span class="spinner"></span>正在加载字体...`);
   let fontBytes;
   try {
-    fontBytes = loadFont();
+    fontBytes = await loadFont();
   } catch (e) {
     showStatus(`字体加载失败：${e.message}`, true);
     return;
@@ -500,23 +496,44 @@ pdfBtn.addEventListener('click', async () => {
   const minDate = dates[0];
   const maxDate = dates[dates.length - 1];
 
-  // ====== 预加载所有图片到缓存 ======
+  // ====== 预加载所有图片到缓存（并行，每次 6 张）======
   const imageCache = {}; // url -> embedded image
   if (currentWithImages) {
-    for (let i = 0; i < currentEntries.length; i++) {
-      const e = currentEntries[i];
-      if (e.url && !imageCache[e.url]) {
-        showStatus(`<span class="spinner"></span>加载图片 ${i+1}/${currentEntries.length}...`);
-        try {
-          const imgData = await fetchImageAsArrayBuffer(OSS + e.url);
-          if (imgData) {
-            let embedded;
-            try { embedded = await doc.embedJpg(imgData); }
-            catch { try { embedded = await doc.embedPng(imgData); } catch {} }
-            if (embedded) imageCache[e.url] = embedded;
-          }
-        } catch {}
+    // 收集需要加载的图片 URL（去重）
+    const toLoad = [];
+    const seen = new Set();
+    for (const e of currentEntries) {
+      if (e.url && !seen.has(e.url)) {
+        seen.add(e.url);
+        toLoad.push(e.url);
       }
+    }
+
+    // 并行加载：每次同时 6 张
+    const BATCH = 6;
+    let loaded = 0;
+    for (let i = 0; i < toLoad.length; i += BATCH) {
+      const batch = toLoad.slice(i, i + BATCH);
+      showStatus(`<span class="spinner"></span>加载图片 ${loaded + 1}-${Math.min(loaded + BATCH, toLoad.length)}/${toLoad.length}...`);
+      const results = await Promise.all(batch.map(async (url) => {
+        try {
+          const imgData = await fetchImageAsArrayBuffer(OSS + url);
+          if (!imgData) return [url, null];
+          try {
+            const embedded = await doc.embedJpg(imgData);
+            return [url, embedded];
+          } catch {
+            try {
+              const embedded = await doc.embedPng(imgData);
+              return [url, embedded];
+            } catch { return [url, null]; }
+          }
+        } catch { return [url, null]; }
+      }));
+      for (const [url, embedded] of results) {
+        if (embedded) imageCache[url] = embedded;
+      }
+      loaded += batch.length;
     }
   }
 
@@ -914,41 +931,6 @@ function drawListToc(doc, font, entries, diaryPages, cfg) {
 
     tocY -= 20;
   }
-}
-
-// ====== 页面初始化：等待字体数据加载完成 ======
-function hideLoader() {
-  const loader = document.getElementById('loader');
-  if (loader) {
-    loader.style.opacity = '0';
-    setTimeout(() => loader.style.display = 'none', 400);
-  }
-}
-
-function showLoaderError(msg) {
-  const loader = document.getElementById('loader');
-  if (loader) {
-    loader.innerHTML = `<div style="text-align:center;padding:20px;">
-      <div style="font-size:1rem;color:#d44;margin-bottom:12px;">${msg}</div>
-      <button onclick="location.reload()" style="padding:8px 20px;border:1px solid #8e6b3c;border-radius:8px;background:#fff;color:#8e6b3c;cursor:pointer;">刷新页面</button>
-    </div>`;
-  }
-}
-
-function initPage() {
-  if (typeof FONT_BASE64 === 'undefined') {
-    showLoaderError('字体数据加载失败，请检查网络后刷新页面');
-    return;
-  }
-  hideLoader();
-}
-
-// font_data.js 是同步 <script> 标签加载，页面解析完即可用
-// 用 DOMContentLoaded 确保所有元素就绪
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initPage);
-} else {
-  initPage();
 }
 </script>
 </body>
