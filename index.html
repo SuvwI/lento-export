@@ -173,11 +173,6 @@
   <div class="help" style="margin-bottom:16px;">不选日期就是导出全年的日记</div>
 
   <div class="checkbox-row" style="margin-bottom:16px;">
-    <input type="checkbox" id="includeImages" checked>
-    <label for="includeImages">包含图片（不勾选只导出文字，PDF 体积更小）</label>
-  </div>
-
-  <div class="checkbox-row" style="margin-bottom:16px;">
     <input type="checkbox" id="calendarToc" checked>
     <label for="calendarToc">日历样式目录（带缩略图，点击跳转）</label>
   </div>
@@ -211,7 +206,6 @@ const shareUrl = $('shareUrl');
 const yearSel = $('year');
 const dateFrom = $('dateFrom');
 const dateTo = $('dateTo');
-const includeImages = $('includeImages');
 const calendarToc = $('calendarToc');
 const fetchBtn = $('fetchBtn');
 const pdfBtn = $('pdfBtn');
@@ -375,11 +369,11 @@ fetchBtn.addEventListener('click', async () => {
     });
     const filtered = filterByDate(entries, dateFrom.value, dateTo.value);
     currentEntries = filtered;
-    currentWithImages = includeImages.checked;
+    currentWithImages = true;
     currentUseCalendarToc = calendarToc.checked;
-    renderPreview(filtered, includeImages.checked);
+    renderPreview(filtered, true);
     const imgCount = filtered.filter(e => e.url).length;
-    count.textContent = `共 ${filtered.length} 篇${includeImages.checked && imgCount ? `（含 ${imgCount} 张图）` : ''}`;
+    count.textContent = `共 ${filtered.length} 篇${imgCount ? `（含 ${imgCount} 张图）` : ''}`;
     hideStatus();
     diaries.hidden = false;
     if (!filtered.length) showStatus('这段时间没有日记', false);
@@ -429,12 +423,22 @@ function wrapText(text, maxWidth, font, fontSize) {
 
 // ====== 图片加载（canvas 方式，绕过 CORS）======
 async function fetchImageAsArrayBuffer(url) {
+  // 最多重试 3 次，每次 20 秒超时
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const buf = await loadImageOnce(url, 20000);
+      if (buf) return buf;
+    } catch (e) { /* 继续重试 */ }
+  }
+  return null;
+}
+
+function loadImageOnce(url, timeoutMs) {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.referrerPolicy = 'no-referrer';
-    // 30 秒超时，超时后跳过该图片
-    const timeoutId = setTimeout(() => { img.src = ''; resolve(null); }, 30000);
+    const timeoutId = setTimeout(() => { img.src = ''; resolve(null); }, timeoutMs);
     img.onload = async () => {
       clearTimeout(timeoutId);
       try {
