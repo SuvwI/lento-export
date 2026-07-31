@@ -114,6 +114,34 @@
   .preview-img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 10px; }
   .preview-desc { font-size: 0.95rem; color: #2c2c2e; line-height: 1.9; white-space: pre-wrap; }
   .empty { text-align: center; padding: 40px 20px; color: #8a8a8e; font-size: 0.9rem; }
+
+  /* 进度条 */
+  .progress-wrap {
+    margin-top: 10px;
+    background: #f0ebe0;
+    border-radius: 6px;
+    height: 8px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #b8956a, #9c7a4f);
+    width: 0%;
+    transition: width 0.2s ease;
+    border-radius: 6px;
+  }
+  .progress-meta {
+    display: flex; justify-content: space-between;
+    font-size: 0.75rem; color: #8a8a8e;
+    margin-top: 6px;
+  }
+  .phase-tag {
+    display: inline-block;
+    font-size: 0.7rem; color: #8e6b3c;
+    background: #f5ede0;
+    padding: 2px 8px; border-radius: 8px;
+    margin-right: 6px;
+  }
 </style>
 </head>
 <body>
@@ -163,6 +191,13 @@
 </section>
 
 <div id="status" hidden></div>
+<div id="progressBox" hidden style="max-width:400px;margin:0 auto 16px;">
+  <div class="progress-wrap"><div id="progressFill" class="progress-fill"></div></div>
+  <div class="progress-meta">
+    <span id="progressPhase"></span>
+    <span id="progressCount"></span>
+  </div>
+</div>
 
 <section id="diaries" hidden>
   <div class="toolbar">
@@ -195,6 +230,10 @@ const status = $('status');
 const diaries = $('diaries');
 const list = $('list');
 const count = $('count');
+const progressBox = $('progressBox');
+const progressFill = $('progressFill');
+const progressPhase = $('progressPhase');
+const progressCount = $('progressCount');
 
 let currentAlbumId = null;
 let currentEntries = [];
@@ -203,6 +242,99 @@ let currentUseCalendarToc = true;
 let currentTitle = '片羽集 · 回忆录';
 let currentUser = '';
 let cachedFont = null;
+
+// ====== 共享图片缓存（预览 + PDF 导出复用，避免重复 fetch OSS）======
+// imageBufferCache: url -> ArrayBuffer （原始字节，预览和 PDF 都能用）
+// previewBlobUrls:  url -> blobURL    （仅供 <img> 显示，用完 revoke）
+// PDF 阶段再用 imageEmbedCache: url -> embeddedImage
+const imageBufferCache = new Map();
+const previewBlobUrls = new Map();
+
+function getPreviewBlobUrl(url) {
+  if (previewBlobUrls.has(url)) return previewBlobUrls.get(url);
+  const buf = imageBufferCache.get(url);
+  if (!buf) return null;
+  const blobUrl = URL.createObjectURL(new Blob([buf]));
+  previewBlobUrls.set(url, blobUrl);
+  return blobUrl;
+}
+
+function revokePreviewBlobUrls() {
+  for (const u of previewBlobUrls.values()) URL.revokeObjectURL(u);
+  previewBlobUrls.clear();
+}
+
+// ====== 进度条辅助 ======
+function showProgress(phase, done, total) {
+  progressBox.hidden = false;
+  const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
+  progressFill.style.width = pct + '%';
+  progressPhase.innerHTML = `<span class="phase-tag">${phase}</span>`;
+  progressCount.textContent = total > 0 ? `${done} / ${total}（${pct}%）` : '';
+}
+function hideProgress() {
+  progressBox.hidden = true;
+  progressFill.style.width = '0%';
+}
+
+// ====== 并发受限的图片加载队列 ======
+// 真正的 worker 池模型：N 个 worker 同时拉取，谁完成谁取下一个，无批次间隙
+// 支持：并发限制、实时进度、失败重试、缓存复用
+async function loadImagesWithConcurrency(urls, concurrency, onProgress, retries = 2) {
+  const results = new Map();
+  let nextIndex = 0;
+  let completed = 0;
+  let failed = 0;
+  const total = urls.length;
+
+  async function worker(workerId) {
+    while (true) {
+      const myIndex = nextIndex++;
+      if (myIndex >= total) return;
+      const url = urls[myIndex];
+
+      // 1) 命中缓存（预览阶段已加载过的，直接复用）
+      if (imageBufferCache.has(url)) {
+        results.set(url, imageBufferCache.get(url));
+        completed++;
+        if (onProgress) onProgress(completed, total, failed);
+        continue;
+      }
+
+      // 2) 带重试的 fetch
+      let buf = null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          buf = await fetchImageAsArrayBuffer(OSS + url);
+          if (buf) break;
+        } catch (e) { /* 忽略，继续重试 */ }
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        }
+      }
+
+      if (buf) {
+        imageBufferCache.set(url, buf);
+        results.set(url, buf);
+      } else {
+        failed++;
+        results.set(url, null);
+      }
+      completed++;
+      if (onProgress) onProgress(completed, total, failed);
+      // 偶尔让出主线程，避免 UI 卡顿
+      if (completed % 8 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  // 启动 N 个 worker
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrency, total); i++) {
+    workers.push(worker(i));
+  }
+  await Promise.all(workers);
+  return results;
+}
 
 function parseShareUrl(url) {
   const m = url.match(/album=([^&]+)/);
@@ -291,15 +423,34 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function renderPreview(entries, withImages) {
+async function renderPreview(entries, withImages) {
   list.innerHTML = '';
+  // 清理上一次预览的 blob URL（旧 <img> 已被 innerHTML='' 移除，可安全释放）
+  revokePreviewBlobUrls();
   if (!entries.length) {
     list.innerHTML = '<div class="empty">这段时间没有日记</div>';
     return;
   }
   const preview = document.createElement('div');
   preview.className = 'preview';
-  entries.slice(0, 5).forEach(e => {
+  const previewEntries = entries.slice(0, 5);
+
+  // 预加载这 5 篇的图片到共享缓存（PDF 导出时直接复用，不再重复 fetch）
+  if (withImages) {
+    const urls = [];
+    const seen = new Set();
+    for (const e of previewEntries) {
+      if (e.url && !seen.has(e.url)) { seen.add(e.url); urls.push(e.url); }
+    }
+    if (urls.length) {
+      // 预览只用 4 并发，避免占用过多带宽影响后续 PDF 导出
+      await loadImagesWithConcurrency(urls, 4, (done, total) => {
+        showStatus(`<span class="spinner"></span>加载预览图片 ${done}/${total}...`);
+      });
+    }
+  }
+
+  previewEntries.forEach(e => {
     const iso = e.recorddate.replace(/\//g,'-');
     const d = new Date(iso);
     const weekday = WEEKDAYS[d.getDay()];
@@ -311,7 +462,10 @@ function renderPreview(entries, withImages) {
       <div class="preview-loc">${escapeHtml(loc)}</div>
     </div>`;
     if (withImages && e.url) {
-      html += `<img class="preview-img" src="${OSS + e.url}" referrerpolicy="no-referrer" loading="lazy">`;
+      // 优先用缓存里的 blob URL（预览加载过的），否则回退到 OSS 直链
+      const blobUrl = getPreviewBlobUrl(e.url);
+      const src = blobUrl || (OSS + e.url);
+      html += `<img class="preview-img" src="${src}" referrerpolicy="no-referrer" loading="lazy">`;
     }
     if (e.desc) {
       html += `<div class="preview-desc">${escapeHtml(e.desc)}</div>`;
@@ -353,13 +507,15 @@ fetchBtn.addEventListener('click', async () => {
     currentEntries = filtered;
     currentWithImages = true;
     currentUseCalendarToc = calendarToc.checked;
-    renderPreview(filtered, true);
+    await renderPreview(filtered, true);
     const imgCount = filtered.filter(e => e.url).length;
     count.textContent = `共 ${filtered.length} 篇${imgCount ? `（含 ${imgCount} 张图）` : ''}`;
     hideStatus();
+    hideProgress();
     diaries.hidden = false;
     if (!filtered.length) showStatus('这段时间没有日记', false);
   } catch (e) {
+    hideProgress();
     showStatus(`获取失败：${e.message}<br>请检查链接是否正确，或稍后重试`, true);
   }
 });
@@ -515,6 +671,36 @@ function detectImageType(buf) {
   return 'unknown';
 }
 
+// 用 canvas 将任意图片格式转码为标准 JPEG ArrayBuffer
+// 用途：pdf-lib embedJpg/embedPng 失败时（如 CMYK JPEG、渐进式 JPEG、webp 等），
+// 用浏览器 canvas 重新编码为标准 JPEG，确保所有图片都能成功嵌入 PDF
+async function convertBufferToJpeg(buf) {
+  const blob = new Blob([buf]);
+  const objUrl = URL.createObjectURL(blob);
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(async (b) => {
+            if (!b) { reject(new Error('toBlob 返回 null')); return; }
+            resolve(await b.arrayBuffer());
+          }, 'image/jpeg', 0.92);
+        } catch (e) { reject(e); }
+      };
+      img.onerror = () => reject(new Error('Image 加载失败'));
+      img.src = objUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
+}
+
 // ====== 用 pdf-lib 生成 PDF ======
 pdfBtn.addEventListener('click', async () => {
   if (!currentEntries.length) {
@@ -522,15 +708,22 @@ pdfBtn.addEventListener('click', async () => {
     return;
   }
 
+  // 禁用按钮，防止重复点击
+  pdfBtn.disabled = true;
+  const restoreBtn = () => { pdfBtn.disabled = false; };
+
   showStatus(`<span class="spinner"></span>正在加载字体...`);
   let fontBytes;
   try {
     fontBytes = await loadFont();
   } catch (e) {
     showStatus(`字体加载失败：${e.message}`, true);
+    hideProgress();
+    restoreBtn();
     return;
   }
 
+  try {
   showStatus(`<span class="spinner"></span>正在生成 PDF...`);
 
   const doc = await PDFDocument.create();
@@ -556,8 +749,9 @@ pdfBtn.addEventListener('click', async () => {
   const minDate = dates[0];
   const maxDate = dates[dates.length - 1];
 
-  // ====== 预加载所有图片到缓存（并行，每次 6 张）======
-  const imageCache = {}; // url -> embedded image
+  // ====== 图片处理：两阶段（fetch 与 embed 分离）======
+  // imageCache: url -> embedded image（供后续 drawImage 复用）
+  const imageCache = {};
   if (currentWithImages) {
     // 收集需要加载的图片 URL（去重）
     const toLoad = [];
@@ -569,32 +763,65 @@ pdfBtn.addEventListener('click', async () => {
       }
     }
 
-    // 并行加载：每次同时 6 张
-    const BATCH = 6;
-    let loaded = 0;
-    for (let i = 0; i < toLoad.length; i += BATCH) {
-      const batch = toLoad.slice(i, i + BATCH);
-      showStatus(`<span class="spinner"></span>加载图片 ${loaded + 1}-${Math.min(loaded + BATCH, toLoad.length)}/${toLoad.length}...`);
-      const results = await Promise.all(batch.map(async (url) => {
-        try {
-          const imgData = await fetchImageAsArrayBuffer(OSS + url);
-          if (!imgData) return [url, null];
-          // 根据图片 magic bytes 选择 embed 方法，避免试错
-          const type = detectImageType(imgData);
-          try {
-            if (type === 'jpeg') return [url, await doc.embedJpg(imgData)];
-            if (type === 'png') return [url, await doc.embedPng(imgData)];
-            // unknown 类型：先试 JPG 再试 PNG
-            try { return [url, await doc.embedJpg(imgData)]; }
-            catch { return [url, await doc.embedPng(imgData)]; }
-          } catch { return [url, null]; }
-        } catch { return [url, null]; }
-      }));
-      for (const [url, embedded] of results) {
-        if (embedded) imageCache[url] = embedded;
+    // —— 阶段 1：并发 fetch 所有 ArrayBuffer（纯网络 IO，与 embed 解耦）——
+    // 8 并发：HTTP/2 一般每域名 6 路，多 2 路用于补位重试，避免批次间隙
+    // 预览阶段已加载的图片会命中 imageBufferCache，零重复请求
+    showStatus(`<span class="spinner"></span>加载图片中...`);
+    const buffers = await loadImagesWithConcurrency(toLoad, 8, (done, total, failed) => {
+      showProgress('加载图片', done, total);
+      showStatus(`<span class="spinner"></span>加载图片 ${done}/${total}${failed ? `（失败 ${failed}）` : ''}...`);
+    });
+
+    // —— 阶段 2：embed 到 PDF（纯 CPU，分块处理并定期让出主线程）——
+    // 拆分的好处：网络等待时不再阻塞 embed，embed 时不再占用网络窗口
+    let embedded = 0;
+    let embedFailed = 0;
+    let canvasConverted = 0; // 通过 canvas 转码成功的数量（诊断用）
+    const embedTotal = toLoad.length;
+    for (const url of toLoad) {
+      const buf = buffers.get(url);
+      if (!buf) { embedded++; embedFailed++; continue; }
+      const type = detectImageType(buf);
+      let embedOk = false;
+      try {
+        if (type === 'jpeg') { imageCache[url] = await doc.embedJpg(buf); embedOk = true; }
+        else if (type === 'png') { imageCache[url] = await doc.embedPng(buf); embedOk = true; }
+        else {
+          // unknown 类型：先试 JPG 再试 PNG
+          try { imageCache[url] = await doc.embedJpg(buf); embedOk = true; }
+          catch { try { imageCache[url] = await doc.embedPng(buf); embedOk = true; } catch {} }
+        }
+      } catch (e) {
+        // embed 失败（CMYK JPEG、渐进式 JPEG、特殊编码等），用 canvas 转码为标准 JPEG 后重试
+        console.warn(`[embed 失败] ${url} type=${type} ${e.message}，尝试 canvas 转码...`);
       }
-      loaded += batch.length;
+      // canvas 转码 fallback：直接 embed 失败时，用 canvas 重新编码为标准 JPEG
+      if (!embedOk) {
+        try {
+          const jpegBuf = await convertBufferToJpeg(buf);
+          imageCache[url] = await doc.embedJpg(jpegBuf);
+          embedOk = true;
+          canvasConverted++;
+          console.info(`[canvas 转码成功] ${url}`);
+        } catch (e2) {
+          console.error(`[embed 最终失败] ${url} ${e2.message}`);
+        }
+      }
+      if (!embedOk) embedFailed++;
+      embedded++;
+      // 进度更新 + 每 10 张让出一次主线程，保持 UI 响应
+      if (embedded % 10 === 0 || embedded === embedTotal) {
+        showProgress('嵌入图片', embedded, embedTotal);
+        showStatus(`<span class="spinner"></span>嵌入图片 ${embedded}/${embedTotal}${embedFailed ? `（失败 ${embedFailed}）` : ''}...`);
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
+    // 诊断日志：如果 embed 有失败或 canvas 转码，在控制台输出汇总
+    if (embedFailed > 0 || canvasConverted > 0) {
+      console.warn(`[图片 embed 汇总] 总计 ${embedTotal}，canvas 转码 ${canvasConverted}，最终失败 ${embedFailed}`);
+    }
+    // 释放预览用的 blob URL（embed 完成后不再需要 <img> 显示）
+    revokePreviewBlobUrls();
   }
 
   // ====== 封面页 ======
@@ -643,6 +870,7 @@ pdfBtn.addEventListener('click', async () => {
     const loc = e.location || '';
     const dateText = `${iso}  ${weekday}`;
 
+    showProgress('生成日记', i + 1, currentEntries.length);
     showStatus(`<span class="spinner"></span>生成日记 ${i+1}/${currentEntries.length}...`);
 
     // 每篇日记新起一页
@@ -736,6 +964,7 @@ pdfBtn.addEventListener('click', async () => {
 
   // ====== 目录页 ======
   // 关键：用 insertPage 在封面后连续插入目录页，而不是 addPage（会追加到文档末尾导致目录被日记页打断）
+  showProgress('生成目录', 1, 1);
   showStatus(`<span class="spinner"></span>生成目录...`);
   let tocInsertIndex = 1; // 封面在 index 0，目录从 index 1 开始，日记页会被往后推
 
@@ -752,6 +981,7 @@ pdfBtn.addEventListener('click', async () => {
   }
 
   // ====== 保存并下载 ======
+  showProgress('保存 PDF', 1, 1);
   showStatus(`<span class="spinner"></span>保存 PDF...`);
   const pdfBytes = await doc.save();
   const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -764,8 +994,15 @@ pdfBtn.addEventListener('click', async () => {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 
+  hideProgress();
   hideStatus();
   showStatus(`✅ PDF 已生成并下载，共 ${doc.getPageCount()} 页`);
+  } catch (e) {
+    hideProgress();
+    showStatus(`生成 PDF 失败：${e.message}`, true);
+  } finally {
+    restoreBtn();
+  }
 });
 
 // ====== 日历样式目录 ======
